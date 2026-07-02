@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RajTransit Resilience Analyzer</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#080C14;--surface:#0F1724;--s2:#161F30;--border:#1E2D45;
+  --accent:#F97316;--safe:#10B981;--danger:#EF4444;--reach:#06B6D4;--dead:#F59E0B;--path:#A3E635;
+  --text:#E2E8F0;--sub:#64748B;--white:#F8FAFC;
+}
+body{background:var(--bg);color:var(--text);font-family:'Space Grotesk',sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+/* ── Header ── */
+#hdr{display:flex;align-items:center;justify-content:space-between;padding:11px 18px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;z-index:1000}
+#hdr h1{font-size:15px;font-weight:700;letter-spacing:.03em}
+#hdr h1 span{color:var(--accent)}
+.badge{background:var(--s2);border:1px solid var(--border);border-radius:4px;padding:3px 9px;font-size:10px;color:var(--sub);font-family:'JetBrains Mono',monospace}
+
+/* ── Mode Bar ── */
+#modes{display:flex;gap:4px;padding:7px 14px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
+.mbtn{padding:6px 13px;border-radius:6px;border:1px solid var(--border);background:var(--s2);color:var(--sub);font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;font-family:inherit;letter-spacing:.02em}
+.mbtn:hover{border-color:var(--accent);color:var(--text)}
+.mbtn.on{background:var(--accent);border-color:var(--accent);color:#fff}
+
+/* ── Layout ── */
+#main{display:flex;flex:1;overflow:hidden}
+#sidebar{width:274px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;flex-shrink:0}
+.sec{padding:13px 15px;border-bottom:1px solid var(--border)}
+.sec h3{font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--sub);text-transform:uppercase;margin-bottom:9px}
+
+/* ── Stat Grid ── */
+.sgrid{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.sbox{background:var(--s2);border-radius:6px;padding:10px;border:1px solid var(--border)}
+.sbox .v{font-size:19px;font-weight:700;color:var(--white);font-family:'JetBrains Mono'}
+.sbox .l{font-size:10px;color:var(--sub);margin-top:2px}
+
+/* ── Risk Meter ── */
+.rbar-bg{background:var(--s2);border-radius:99px;height:5px;margin-top:5px}
+.rbar{height:5px;border-radius:99px;transition:width .4s ease}
+
+/* ── Row items ── */
+.row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:11px}
+.row:last-child{border-bottom:none}
+.row .k{color:var(--sub)}
+.row .vv{font-weight:600;font-family:'JetBrains Mono'}
+
+/* ── Corridor ── */
+.cname{font-size:11px;max-width:158px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text)}
+.cbadge{font-family:'JetBrains Mono';font-size:10px;padding:2px 6px;border-radius:3px;color:#fff;font-weight:700;flex-shrink:0}
+
+/* ── Buttons ── */
+.btn-r{width:100%;padding:8px;background:var(--danger);border:none;border-radius:6px;color:#fff;font-family:inherit;font-weight:700;font-size:11px;cursor:pointer;margin-top:10px;transition:opacity .15s}
+.btn-r:hover{opacity:.85}
+
+/* ── Slider ── */
+.tslider{width:100%;margin:8px 0;accent-color:var(--reach);cursor:pointer}
+
+/* ── Dead list ── */
+.dlist{max-height:280px;overflow-y:auto}
+.ditem{padding:5px 0;font-size:11px;color:var(--text);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px}
+.ditem::before{content:'●';color:var(--dead);font-size:7px;flex-shrink:0}
+
+/* ── Map ── */
+#mapwrap{position:relative;flex:1}
+#map{width:100%;height:100%}
+
+/* ── Tooltip ── */
+#tt{position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:11px;pointer-events:none;z-index:9999;max-width:230px;box-shadow:0 4px 24px rgba(0,0,0,.6);display:none}
+#tt .ttt{font-weight:700;color:var(--white);margin-bottom:4px;font-size:12px}
+#tt .ttc{color:var(--accent);font-family:'JetBrains Mono';font-size:15px;font-weight:700}
+#tt .ttr{color:var(--sub);font-size:10px;margin-top:3px}
+
+/* ── Legend ── */
+#legend{position:absolute;bottom:28px;right:10px;z-index:500;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:10px}
+.li{display:flex;align-items:center;gap:7px;margin-bottom:4px}
+.lc{width:26px;height:3px;border-radius:2px}
+
+/* ── Instruction ── */
+#instr{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:500;background:var(--surface);border:1px solid var(--accent);border-radius:6px;padding:6px 15px;font-size:11px;color:var(--accent);font-weight:600;pointer-events:none;white-space:nowrap}
+
+/* ── Loading ── */
+#loading{position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+#loading .logo{font-size:30px;font-weight:700}
+#loading .logo span{color:var(--accent)}
+.prog-bg{width:180px;height:2px;background:var(--border);border-radius:99px;overflow:hidden}
+.prog{height:100%;background:var(--accent);animation:ld 1.4s ease infinite;width:35%}
+@keyframes ld{0%{transform:translateX(-100%)}100%{transform:translateX(420%)}}
+
+.hidden{display:none!important}
+
+/* leaflet stop tooltip */
+.leaflet-tooltip{background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:'Space Grotesk',sans-serif;font-size:11px;font-weight:500;border-radius:5px;padding:4px 8px;box-shadow:0 2px 10px rgba(0,0,0,.5)}
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading">
+  <div class="logo">Raj<span>Transit</span></div>
+  <div style="color:var(--sub);font-size:11px">Parsing Rajkot transit network…</div>
+  <div class="prog-bg"><div class="prog"></div></div>
+</div>
+
+<!-- Header -->
+<div id="hdr">
+  <h1>🚌 Raj<span>Transit</span> Resilience Analyzer</h1>
+  <div style="display:flex;gap:6px">
+    <div class="badge">716 stops</div>
+    <div class="badge">903 edges</div>
+    <div class="badge">168 routes</div>
+    <div class="badge">Rajkot, Gujarat</div>
+  </div>
+</div>
+
+<!-- Mode Bar -->
+<div id="modes">
+  <button class="mbtn on" onclick="setMode('heatmap')">🔥 Vulnerability Heatmap</button>
+  <button class="mbtn"    onclick="setMode('simulator')">🚧 Road Block Simulator</button>
+  <button class="mbtn"    onclick="setMode('reachability')">📡 Reachability Explorer</button>
+  <button class="mbtn"    onclick="setMode('deadzones')">⚠️ Dead Zone Finder</button>
+  <button class="mbtn"    onclick="setMode('pathfinder')">🧭 Shortest Path</button>
+</div>
+
+<!-- Main -->
+<div id="main">
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+
+    <!-- HEATMAP SIDEBAR -->
+    <div id="sb-heatmap">
+      <div class="sec">
+        <h3>Network Overview</h3>
+        <div class="sgrid">
+          <div class="sbox"><div class="v">716</div><div class="l">Bus Stops</div></div>
+          <div class="sbox"><div class="v">903</div><div class="l">Road Edges</div></div>
+          <div class="sbox"><div class="v">168</div><div class="l">Routes</div></div>
+          <div class="sbox"><div class="v" id="max-load" style="color:var(--danger)">—</div><div class="l">Peak Load</div></div>
+        </div>
+      </div>
+      <div class="sec">
+        <h3>Network Risk Score</h3>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:10px;color:var(--sub)">Concentration Vulnerability</span>
+          <span id="risk-score" style="font-family:'JetBrains Mono';font-size:17px;font-weight:700;color:var(--danger)">—</span>
+        </div>
+        <div class="rbar-bg"><div class="rbar" id="risk-bar" style="background:var(--danger);width:0%"></div></div>
+        <div style="font-size:9px;color:var(--sub);margin-top:5px">Calculated from edge concentration + dead zones (39)</div>
+      </div>
+      <div class="sec" style="flex:1">
+        <h3>Top 10 Overloaded Corridors</h3>
+        <div id="corridor-list"></div>
+      </div>
+    </div>
+
+    <!-- SIMULATOR SIDEBAR -->
+    <div id="sb-simulator" class="hidden">
+      <div class="sec">
+        <h3>Road Block Simulator</h3>
+        <p style="font-size:11px;color:var(--sub);line-height:1.6">Click any road segment to block it. The network fragments in real time — watch which stops get isolated.</p>
+      </div>
+      <div class="sec">
+        <h3>Live Disruption Stats</h3>
+        <div class="row"><span class="k">Blocked Edges</span><span class="vv" id="sim-blocked">0</span></div>
+        <div class="row"><span class="k">Routes Disrupted</span><span class="vv" id="sim-routes" style="color:var(--danger)">0</span></div>
+        <div class="row"><span class="k">Unreachable Stops</span><span class="vv" id="sim-stops" style="color:var(--danger)">0</span></div>
+        <div class="row"><span class="k">Network Intact</span><span class="vv" id="sim-pct" style="color:var(--safe)">100%</span></div>
+        <button class="btn-r" onclick="resetSimulator()">↺ Reset All Blocks</button>
+      </div>
+      <div class="sec" style="flex:1">
+        <h3>Blocked Segments</h3>
+        <div id="blocked-list" style="font-size:11px;color:var(--sub)">None blocked yet</div>
+      </div>
+    </div>
+
+    <!-- REACHABILITY SIDEBAR -->
+    <div id="sb-reachability" class="hidden">
+      <div class="sec">
+        <h3>Reachability Explorer</h3>
+        <p style="font-size:11px;color:var(--sub);line-height:1.6">Click any stop. Adjust hops to see how far you can travel. Each hop ≈ one bus segment (~3 min).</p>
+      </div>
+      <div class="sec">
+        <h3>Travel Depth (Hops)</h3>
+        <input type="range" class="tslider" id="time-slider" min="2" max="20" value="8" oninput="updateHops(this.value)">
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--sub)">
+          <span>2 hops</span>
+          <span id="hop-label" style="color:var(--reach);font-weight:600">8 hops (~24 min)</span>
+          <span>20 hops</span>
+        </div>
+      </div>
+      <div class="sec">
+        <h3>Selected Stop</h3>
+        <div id="sel-stop" style="font-size:12px;font-weight:600;color:var(--white)">None selected</div>
+        <div style="margin-top:8px">
+          <div class="row"><span class="k">Reachable Stops</span><span class="vv" id="reach-count" style="color:var(--reach)">—</span></div>
+          <div class="row"><span class="k">Network Coverage</span><span class="vv" id="reach-pct" style="color:var(--reach)">—</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DEAD ZONE SIDEBAR -->
+    <div id="sb-deadzones" class="hidden">
+      <div class="sec">
+        <h3>Dead Zone Analysis</h3>
+        <div class="sbox" style="margin-bottom:8px">
+          <div class="v" style="color:var(--dead)">39</div>
+          <div class="l">Zero-redundancy stops (5.4% of network)</div>
+        </div>
+        <p style="font-size:11px;color:var(--sub);line-height:1.6">These stops are served by exactly <strong style="color:var(--text)">one route</strong>. If that route is cancelled due to a breakdown or road closure, these areas have <strong style="color:var(--dead)">zero</strong> bus coverage.</p>
+      </div>
+      <div class="sec" style="flex:1">
+        <h3>Dead Zone Stops (39)</h3>
+        <div class="dlist" id="dead-list"></div>
+      </div>
+    </div>
+
+    <!-- PATHFINDER SIDEBAR -->
+    <div id="sb-pathfinder" class="hidden">
+      <div class="sec">
+        <h3>Shortest Path (Dijkstra)</h3>
+        <p style="font-size:11px;color:var(--sub);line-height:1.6">Click a start stop, then an end stop. Dijkstra finds the route with the least real-world travel distance — not just fewest hops.</p>
+      </div>
+      <div class="sec">
+        <h3>Selection</h3>
+        <div class="row"><span class="k">Start</span><span class="vv" id="path-start" style="color:var(--white)">—</span></div>
+        <div class="row"><span class="k">End</span><span class="vv" id="path-end" style="color:var(--white)">—</span></div>
+        <button class="btn-r" style="background:var(--s2);border:1px solid var(--border)" onclick="resetPath()">↺ Reset Selection</button>
+      </div>
+      <div class="sec" style="flex:1">
+        <h3>Route Result</h3>
+        <div class="row"><span class="k">Total Distance</span><span class="vv" id="path-dist" style="color:var(--path)">—</span></div>
+        <div class="row"><span class="k">Stops on Route</span><span class="vv" id="path-hops" style="color:var(--path)">—</span></div>
+        <div id="path-status" style="font-size:11px;color:var(--sub);margin-top:8px;line-height:1.6">Select a start stop on the map.</div>
+      </div>
+    </div>
+
+  </div><!-- /sidebar -->
+
+  <!-- Map Wrapper -->
+  <div id="mapwrap">
+    <div id="map"></div>
+    <div id="instr">🔥 Hover edges to see route load — red = highest fragility</div>
+    <div id="legend">
+      <div style="font-size:9px;font-weight:700;color:var(--sub);margin-bottom:6px;letter-spacing:.08em">ROUTES PER EDGE</div>
+      <div class="li"><div class="lc" style="background:#10B981"></div><span>1–2</span></div>
+      <div class="li"><div class="lc" style="background:#84CC16"></div><span>3–7</span></div>
+      <div class="li"><div class="lc" style="background:#F59E0B"></div><span>8–19</span></div>
+      <div class="li"><div class="lc" style="background:#F97316"></div><span>20–49</span></div>
+      <div class="li"><div class="lc" style="background:#EF4444"></div><span>50+ ⚠️</span></div>
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<!-- Tooltip -->
+<div id="tt">
+  <div class="ttt" id="tt-title"></div>
+  <div><span class="ttc" id="tt-cnt"></span> <span style="color:var(--sub);font-size:10px">routes share this segment</span></div>
+  <div class="ttr" id="tt-routes"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════
+const S = {
+  mode: 'heatmap',
+  blocked: new Set(),   // edge indices
+  selectedStop: null,
+  hops: 8,
+  pathStart: null,      // Dijkstra: selected start stop
+  pathEnd: null,        // Dijkstra: selected end stop
+};
+
+// ═══════════════════════════════════════════════════════
+//  DATA
+// ═══════════════════════════════════════════════════════
+let stops = {};       // id → {id, name, deg, lat, lon}
+let edges = [];       // GeoJSON features (LineStrings)
+let adj   = {};       // id → [{to, edgeIdx}]
+let edgeWeights = [];  // edgeIdx → real-world length in km (Haversine)
+
+// ═══════════════════════════════════════════════════════
+//  LEAFLET
+// ═══════════════════════════════════════════════════════
+let map;
+let edgeLayers = [];        // Leaflet polylines, one per edge
+let stopMarkers = {};       // stop id → Leaflet circleMarker
+let reachLayer = null;
+let deadLayer  = null;
+let pathLayer  = null;
+
+// ═══════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════
+async function init() {
+  map = L.map('map', { zoomControl: false }).setView([22.3039, 70.8022], 12);
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap contributors © CartoDB',
+    maxZoom: 19
+  }).addTo(map);
+
+  const res = await fetch('./data/rajkot_graph.geojson');
+  const geojson = await res.json();
+
+  // Parse
+  geojson.features.forEach(f => {
+    if (f.geometry.type === 'Point') {
+      const p = f.properties;
+      stops[p.id] = { id: p.id, name: p.station_label, deg: +p.deg,
+                      lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0] };
+    } else if (f.geometry.type === 'LineString') {
+      edges.push(f);
+    }
+  });
+
+  // Build adjacency
+  Object.keys(stops).forEach(id => adj[id] = []);
+  edges.forEach((e, idx) => {
+    const { from, to } = e.properties;
+    if (adj[from]) adj[from].push({ to, edgeIdx: idx });
+    if (adj[to])   adj[to].push({ to: from, edgeIdx: idx });
+  });
+
+  // Real-world edge lengths (km) — sum of Haversine distances along each
+  // edge's geometry, used as Dijkstra weights for the Shortest Path feature
+  edges.forEach((e, idx) => {
+    const coords = e.geometry.coordinates; // [lon, lat] pairs
+    let len = 0;
+    for (let i = 1; i < coords.length; i++) {
+      len += haversineKm(coords[i-1][1], coords[i-1][0], coords[i][1], coords[i][0]);
+    }
+    edgeWeights[idx] = len > 0 ? len : 0.001; // avoid zero-weight ties
+  });
+
+  renderEdges();
+  renderStops();
+  computeStats();
+  document.getElementById('loading').classList.add('hidden');
+}
+
+// ═══════════════════════════════════════════════════════
+//  HAVERSINE (great-circle distance, in km)
+// ═══════════════════════════════════════════════════════
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 +
+            Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) *
+            Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// ═══════════════════════════════════════════════════════
+//  COLORS
+// ═══════════════════════════════════════════════════════
+function eColor(n) {
+  if (n >= 50) return '#EF4444';
+  if (n >= 20) return '#F97316';
+  if (n >= 8)  return '#F59E0B';
+  if (n >= 3)  return '#84CC16';
+  return '#10B981';
+}
+function eWeight(n) {
+  if (n >= 50) return 5.5;
+  if (n >= 20) return 4;
+  if (n >= 8)  return 3;
+  if (n >= 3)  return 2;
+  return 1.5;
+}
+
+// ═══════════════════════════════════════════════════════
+//  RENDER EDGES
+// ═══════════════════════════════════════════════════════
+function renderEdges() {
+  edges.forEach((edge, idx) => {
+    const n = edge.properties.lines.length;
+    const coords = edge.geometry.coordinates.map(c => [c[1], c[0]]);
+    const poly = L.polyline(coords, { color: eColor(n), weight: eWeight(n), opacity: 0.88 });
+    poly.on('mouseover', e => showTT(e.originalEvent, edge));
+    poly.on('mouseout', hideTT);
+    poly.on('click', () => onEdgeClick(idx, edge));
+    poly.addTo(map);
+    edgeLayers.push(poly);
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+//  RENDER STOPS
+// ═══════════════════════════════════════════════════════
+function renderStops() {
+  Object.values(stops).forEach(s => {
+    const isDead = s.deg === 1;
+    const r = Math.max(3, Math.min(9, 2 + s.deg * 1.3));
+    const m = L.circleMarker([s.lat, s.lon], {
+      radius: r,
+      fillColor: isDead ? '#F59E0B' : '#1D3461',
+      color: isDead ? '#FDE68A' : '#3B82F6',
+      weight: 1.2, fillOpacity: 0.9, opacity: 1,
+    });
+    m.bindTooltip(s.name, { direction: 'top', sticky: false });
+    m.on('click', () => onStopClick(s));
+    m.addTo(map);
+    stopMarkers[s.id] = m;
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+//  TOOLTIP
+// ═══════════════════════════════════════════════════════
+function showTT(e, edge) {
+  const n = edge.properties.lines.length;
+  const from = stops[edge.properties.from]?.name || '?';
+  const to   = stops[edge.properties.to]?.name   || '?';
+  const sample = edge.properties.lines.slice(0, 6).map(l => l.label).join(', ');
+  document.getElementById('tt-title').textContent = `${from} → ${to}`;
+  document.getElementById('tt-cnt').textContent = n;
+  document.getElementById('tt-routes').textContent = n > 6 ? `${sample} +${n-6} more` : sample;
+  const tt = document.getElementById('tt');
+  tt.style.display = 'block';
+  tt.style.left = (e.clientX + 14) + 'px';
+  tt.style.top  = (e.clientY - 8)  + 'px';
+}
+function hideTT() { document.getElementById('tt').style.display = 'none'; }
+document.addEventListener('mousemove', e => {
+  const tt = document.getElementById('tt');
+  if (tt.style.display === 'block') {
+    tt.style.left = (e.clientX + 14) + 'px';
+    tt.style.top  = (e.clientY - 8)  + 'px';
+  }
+});
+
+// ═══════════════════════════════════════════════════════
+//  MODE SWITCHING
+// ═══════════════════════════════════════════════════════
+function setMode(mode) {
+  S.mode = mode;
+  const modes = ['heatmap','simulator','reachability','deadzones','pathfinder'];
+
+  // Update buttons
+  document.querySelectorAll('.mbtn').forEach((b, i) =>
+    b.classList.toggle('on', modes[i] === mode));
+
+  // Update sidebar panels
+  modes.forEach(m =>
+    document.getElementById(`sb-${m}`).classList.toggle('hidden', m !== mode));
+
+  // Clear temp layers
+  clearReach();
+  clearDead();
+  clearPath();
+
+  const instr  = document.getElementById('instr');
+  const legend = document.getElementById('legend');
+
+  if (mode === 'heatmap') {
+    instr.textContent = '🔥 Hover edges to see route load — red = highest fragility';
+    legend.style.display = 'block';
+    edgeLayers.forEach((l, i) => {
+      const n = edges[i].properties.lines.length;
+      l.setStyle({ color: eColor(n), weight: eWeight(n), opacity: 0.88, dashArray: null });
+    });
+    // Restore stop colors
+    Object.values(stops).forEach(s => {
+      const isDead = s.deg === 1;
+      stopMarkers[s.id]?.setStyle({
+        fillColor: isDead ? '#F59E0B' : '#1D3461',
+        color: isDead ? '#FDE68A' : '#3B82F6', fillOpacity: 0.9
+      });
+    });
+
+  } else if (mode === 'simulator') {
+    instr.textContent = '🚧 Click any road segment to block it — watch the network fragment';
+    legend.style.display = 'none';
+    applySimStyle();
+    updateSimStats();
+
+  } else if (mode === 'reachability') {
+    instr.textContent = '📡 Click any stop to explore reachability from that point';
+    legend.style.display = 'none';
+    edgeLayers.forEach(l => l.setStyle({ color: '#1E3A5F', weight: 1.5, opacity: 0.35 }));
+    Object.values(stops).forEach(s =>
+      stopMarkers[s.id]?.setStyle({ fillColor: '#1D3461', color: '#3B82F6', fillOpacity: 0.6 }));
+
+  } else if (mode === 'deadzones') {
+    instr.textContent = '⚠️ Orange = zero redundancy — one route failure = complete isolation';
+    legend.style.display = 'none';
+    edgeLayers.forEach(l => l.setStyle({ color: '#1E3A5F', weight: 1.2, opacity: 0.3 }));
+    renderDeadZones();
+
+  } else if (mode === 'pathfinder') {
+    instr.textContent = '🧭 Click a start stop, then an end stop — shortest real-distance route';
+    legend.style.display = 'none';
+    edgeLayers.forEach(l => l.setStyle({ color: '#1E3A5F', weight: 1.5, opacity: 0.35 }));
+    Object.values(stops).forEach(s =>
+      stopMarkers[s.id]?.setStyle({ fillColor: '#1D3461', color: '#3B82F6', fillOpacity: 0.6 }));
+    resetPath();
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  FEATURE 2: ROAD BLOCK SIMULATOR
+// ═══════════════════════════════════════════════════════
+function onEdgeClick(idx, edge) {
+  if (S.mode !== 'simulator') return;
+  if (S.blocked.has(idx)) {
+    S.blocked.delete(idx);
+  } else {
+    S.blocked.add(idx);
+  }
+  applySimStyle();
+  updateSimStats();
+}
+
+function applySimStyle() {
+  edgeLayers.forEach((l, i) => {
+    if (S.blocked.has(i)) {
+      l.setStyle({ color: '#EF4444', weight: 3.5, opacity: 1, dashArray: '8 5' });
+    } else {
+      const n = edges[i].properties.lines.length;
+      l.setStyle({ color: eColor(n), weight: eWeight(n), opacity: 0.7, dashArray: null });
+    }
+  });
+}
+
+function updateSimStats() {
+  // BFS to find connected components
+  const visited = new Set();
+  const components = [];
+  Object.keys(stops).forEach(startId => {
+    if (visited.has(startId)) return;
+    const comp = [];
+    const q = [startId];
+    visited.add(startId);
+    while (q.length) {
+      const curr = q.shift();
+      comp.push(curr);
+      (adj[curr] || []).forEach(({ to, edgeIdx }) => {
+        if (!S.blocked.has(edgeIdx) && !visited.has(to)) {
+          visited.add(to);
+          q.push(to);
+        }
+      });
+    }
+    components.push(comp);
+  });
+
+  const total = Object.keys(stops).length;
+  const mainSz = Math.max(...components.map(c => c.length));
+  const isolated = total - mainSz;
+
+  // Routes disrupted
+  const disrupted = new Set();
+  S.blocked.forEach(idx => edges[idx].properties.lines.forEach(l => disrupted.add(l.label)));
+
+  document.getElementById('sim-blocked').textContent = S.blocked.size;
+  document.getElementById('sim-routes').textContent  = disrupted.size;
+  document.getElementById('sim-stops').textContent   = isolated;
+  document.getElementById('sim-pct').textContent     = Math.round(mainSz / total * 100) + '%';
+
+  // Color isolated stops red
+  const mainSet = new Set(components.find(c => c.length === mainSz) || []);
+  Object.keys(stops).forEach(id => {
+    const isIsolated = !mainSet.has(id);
+    stopMarkers[id]?.setStyle({
+      fillColor: isIsolated ? '#EF4444' : '#1D3461',
+      color:     isIsolated ? '#FCA5A5' : '#3B82F6',
+      fillOpacity: isIsolated ? 1 : 0.7,
+    });
+  });
+
+  // Blocked list
+  const bl = document.getElementById('blocked-list');
+  if (S.blocked.size === 0) {
+    bl.innerHTML = '<span style="color:var(--sub)">None blocked yet</span>';
+    return;
+  }
+  bl.innerHTML = [...S.blocked].map(idx => {
+    const e = edges[idx];
+    const f = stops[e.properties.from]?.name || '?';
+    const t = stops[e.properties.to]?.name   || '?';
+    const n = e.properties.lines.length;
+    return `<div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:11px">
+      <span style="color:var(--text)">${f} → ${t}</span>
+      <span style="color:var(--danger);font-family:'JetBrains Mono';font-size:10px"> [${n} routes]</span>
+    </div>`;
+  }).join('');
+}
+
+function resetSimulator() {
+  S.blocked.clear();
+  applySimStyle();
+  updateSimStats();
+}
+
+// ═══════════════════════════════════════════════════════
+//  FEATURE 3: REACHABILITY BFS
+// ═══════════════════════════════════════════════════════
+function onStopClick(stop) {
+  if (S.mode === 'reachability') {
+    S.selectedStop = stop;
+    document.getElementById('sel-stop').textContent = stop.name;
+    runBFS();
+  } else if (S.mode === 'pathfinder') {
+    onPathStopClick(stop);
+  }
+}
+
+function updateHops(val) {
+  S.hops = +val;
+  document.getElementById('hop-label').textContent = `${val} hops (~${val * 3} min)`;
+  if (S.selectedStop) runBFS();
+}
+
+function runBFS() {
+  clearReach();
+  const visited = new Map();  // id → hops
+  const q = [{ id: S.selectedStop.id, hops: 0 }];
+  visited.set(S.selectedStop.id, 0);
+
+  while (q.length) {
+    const { id, hops } = q.shift();
+    if (hops >= S.hops) continue;
+    (adj[id] || []).forEach(({ to }) => {
+      if (!visited.has(to)) {
+        visited.set(to, hops + 1);
+        q.push({ id: to, hops: hops + 1 });
+      }
+    });
+  }
+
+  // Show reachable as cyan circles
+  const markers = [];
+  visited.forEach((h, id) => {
+    const s = stops[id];
+    if (!s) return;
+    const fade = 0.9 - (h / S.hops) * 0.55;
+    const m = L.circleMarker([s.lat, s.lon], {
+      radius: 5,
+      fillColor: '#06B6D4', color: '#67E8F9',
+      weight: 1, fillOpacity: fade, opacity: 1,
+    });
+    m.bindTooltip(`${s.name} — ${h} hop${h===1?'':'s'}`, { direction: 'top' });
+    markers.push(m);
+  });
+  reachLayer = L.layerGroup(markers).addTo(map);
+
+  const pct = Math.round(visited.size / Object.keys(stops).length * 100);
+  document.getElementById('reach-count').textContent = visited.size;
+  document.getElementById('reach-pct').textContent   = pct + '%';
+}
+
+function clearReach() {
+  if (reachLayer) { reachLayer.remove(); reachLayer = null; }
+}
+
+// ═══════════════════════════════════════════════════════
+//  FEATURE 4: DEAD ZONES
+// ═══════════════════════════════════════════════════════
+function renderDeadZones() {
+  const dead = Object.values(stops).filter(s => s.deg === 1);
+  const markers = dead.map(s =>
+    L.circleMarker([s.lat, s.lon], {
+      radius: 8, fillColor: '#F59E0B', color: '#FDE68A',
+      weight: 2, fillOpacity: 0.95, opacity: 1,
+    }).bindTooltip(`⚠️ ${s.name}`, { direction: 'top' })
+  );
+  deadLayer = L.layerGroup(markers).addTo(map);
+  document.getElementById('dead-list').innerHTML =
+    dead.map(s => `<div class="ditem">${s.name}</div>`).join('');
+}
+
+function clearDead() {
+  if (deadLayer) { deadLayer.remove(); deadLayer = null; }
+}
+
+// ═══════════════════════════════════════════════════════
+//  FEATURE 5: SHORTEST PATH (DIJKSTRA)
+// ═══════════════════════════════════════════════════════
+function onPathStopClick(stop) {
+  // Fresh start: no start yet, or a completed pair already exists
+  if (!S.pathStart || (S.pathStart && S.pathEnd)) {
+    resetPath(false);
+    S.pathStart = stop;
+    document.getElementById('path-start').textContent = stop.name;
+    document.getElementById('path-status').textContent = 'Now click an end stop.';
+    return;
+  }
+  // Second click: set end and solve
+  if (stop.id === S.pathStart.id) return; // ignore clicking the same stop twice
+  S.pathEnd = stop;
+  document.getElementById('path-end').textContent = stop.name;
+  runDijkstra();
+}
+
+// Weighted shortest path via Dijkstra's algorithm.
+// Weight per edge = real-world distance in km (Haversine), so the result
+// is the geographically shortest route, not just the fewest hops.
+// O(V²) with a plain min-scan — 716 nodes means ~512K ops, still instant.
+function dijkstra(startId, endId) {
+  const dist = {}, prev = {}, unvisited = new Set(Object.keys(stops));
+  Object.keys(stops).forEach(id => dist[id] = Infinity);
+  dist[startId] = 0;
+
+  while (unvisited.size) {
+    let u = null, best = Infinity;
+    unvisited.forEach(id => { if (dist[id] < best) { best = dist[id]; u = id; } });
+    if (u === null) break;          // remaining nodes are unreachable
+    unvisited.delete(u);
+    if (u === endId) break;         // shortest path to target is finalized
+
+    (adj[u] || []).forEach(({ to, edgeIdx }) => {
+      if (!unvisited.has(to)) return;
+      const alt = dist[u] + edgeWeights[edgeIdx];
+      if (alt < dist[to]) {
+        dist[to] = alt;
+        prev[to] = u;
+      }
+    });
+  }
+
+  if (dist[endId] === Infinity) return { path: null, dist: 0 };
+
+  const path = [];
+  for (let cur = endId; cur !== undefined; cur = prev[cur]) path.unshift(cur);
+  return { path, dist: dist[endId] };
+}
+
+function runDijkstra() {
+  clearPath();
+  const { path, dist } = dijkstra(S.pathStart.id, S.pathEnd.id);
+
+  if (!path) {
+    document.getElementById('path-dist').textContent   = '—';
+    document.getElementById('path-hops').textContent   = '—';
+    document.getElementById('path-status').textContent = '⚠️ No route found — these stops are in disconnected parts of the network.';
+    return;
+  }
+
+  drawPath(path);
+  document.getElementById('path-dist').textContent   = dist.toFixed(2) + ' km';
+  document.getElementById('path-hops').textContent   = path.length;
+  document.getElementById('path-status').textContent = `Shortest route passes through ${path.length} stops.`;
+}
+
+function drawPath(path) {
+  const latlngs = path.map(id => [stops[id].lat, stops[id].lon]);
+  const line = L.polyline(latlngs, { color: '#A3E635', weight: 5, opacity: 0.95, lineJoin: 'round' });
+  const startDot = L.circleMarker(latlngs[0], { radius: 9, fillColor: '#A3E635', color: '#fff', weight: 2, fillOpacity: 1 });
+  const endDot   = L.circleMarker(latlngs[latlngs.length - 1], { radius: 9, fillColor: '#F97316', color: '#fff', weight: 2, fillOpacity: 1 });
+  pathLayer = L.layerGroup([line, startDot, endDot]).addTo(map);
+}
+
+function clearPath() {
+  if (pathLayer) { pathLayer.remove(); pathLayer = null; }
+}
+
+function resetPath(resetStatusText = true) {
+  S.pathStart = null;
+  S.pathEnd   = null;
+  clearPath();
+  document.getElementById('path-start').textContent = '—';
+  document.getElementById('path-end').textContent   = '—';
+  document.getElementById('path-dist').textContent  = '—';
+  document.getElementById('path-hops').textContent  = '—';
+  if (resetStatusText) document.getElementById('path-status').textContent = 'Select a start stop on the map.';
+}
+
+// ═══════════════════════════════════════════════════════
+//  STATS (Heatmap sidebar)
+// ═══════════════════════════════════════════════════════
+function computeStats() {
+  const loads = edges.map(e => e.properties.lines.length);
+  const maxLoad = Math.max(...loads);
+  document.getElementById('max-load').textContent = maxLoad;
+
+  // Risk score: top-10 avg load as % of total routes + dead zone ratio
+  const top10avg = [...loads].sort((a,b)=>b-a).slice(0,10).reduce((a,b)=>a+b,0)/10;
+  const risk = Math.min(99, Math.round((top10avg/168)*85 + (39/716)*30));
+  document.getElementById('risk-score').textContent = risk + '/100';
+  document.getElementById('risk-bar').style.width   = risk + '%';
+
+  // Top 10 corridors
+  const sorted = [...edges].sort((a,b) =>
+    b.properties.lines.length - a.properties.lines.length).slice(0,10);
+  document.getElementById('corridor-list').innerHTML = sorted.map(e => {
+    const n  = e.properties.lines.length;
+    const fn = stops[e.properties.from]?.name || '?';
+    const tn = stops[e.properties.to]?.name   || '?';
+    return `<div class="row">
+      <span class="cname">${fn} → ${tn}</span>
+      <span class="cbadge" style="background:${eColor(n)}">${n}</span>
+    </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════
+//  BOOT
+// ═══════════════════════════════════════════════════════
+init().catch(() => {
+  document.getElementById('loading').innerHTML = `
+    <div style="color:#EF4444;font-size:15px;font-weight:700">⚠️ Could not load data</div>
+    <div style="color:#64748B;font-size:12px;margin-top:8px;text-align:center;line-height:1.7">
+      Make sure <code style="color:#F97316">data/rajkot_graph.geojson</code> exists<br>
+      and run a local server:<br>
+      <code style="color:#10B981">python3 -m http.server 8080</code><br>
+      then open <code style="color:#10B981">localhost:8080</code>
+    </div>`;
+});
+</script>
+</body>
+</html>
